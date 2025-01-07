@@ -2,21 +2,20 @@
 	import { onMount } from "svelte";
 	import { fly } from "svelte/transition";
 
+	import Hero from "../Hero.svelte";
+	import Header from "../Header.svelte";
 	import { techSkills } from "$lib/enums";
+	import Section from "../Section.svelte";
 	import Text from "$lib/components/Text.svelte";
-	import Hero from "$lib/components/Hero.svelte";
+	import FilterTitle from "../FilterTitle.svelte";
+	import ProjectFilter from "./ProjectFilter.svelte";
+	import Wrench from "$lib/icons/general/Wrench.svelte";
 	import Dropdown from "$lib/components/Dropdown.svelte";
-	import Seperator from "$lib/components/Seperator.svelte";
+	import Separator from "$lib/components/Separator.svelte";
 	import SearchBar from "$lib/components/SearchBar.svelte";
-	import Section from "$lib/components/index/Section.svelte";
-	import TextHeader from "$lib/components/TextHeader.svelte";
 	import Scrollable from "$lib/components/Scrollable.svelte";
-	import MajorHeader from "$lib/components/MajorHeader.svelte";
-	import FilterTitle from "$lib/components/FilterTitle.svelte";
-	import Wrench from "$lib/components/icons/general/Wrench.svelte";
 	import ProjectLoading from "$lib/components/ProjectLoading.svelte";
 	import ProjectPreview from "$lib/components/ProjectPreview.svelte";
-	import ProjectFilter from "$lib/components/projects/ProjectFilter.svelte";
 
 	import type { PageData } from "./$types";
 	import type { AnalyticsInstance } from "analytics";
@@ -73,6 +72,15 @@
 		);
 	};
 
+	// Track if a project was clicked on and what filters were used
+	const trackProject = async (id: string) =>
+		filters.length &&
+		analytics &&
+		(await analytics.track("project_click", {
+			id,
+			tech_skills: filters
+		}));
+
 	// Once mounted check if there's any URL search params, if so, input them
 	onMount(async () => {
 		const param = new URLSearchParams(window.location.search).get("search");
@@ -84,15 +92,6 @@
 			.then(({ analytics }) => analytics)
 			.catch(() => undefined);
 	});
-
-	// Track if a project was clicked on and what filters were used
-	const trackProject = async (id: string) =>
-		filters.length &&
-		analytics &&
-		(await analytics.track("project_click", {
-			id,
-			tech_skills: filters
-		}));
 </script>
 
 <svelte:head>
@@ -101,7 +100,7 @@
 
 <Hero
 	class="from-pink-light to-pink-dark"
-	title="Projects from personal to professional."
+	title="Projects from personal to professional"
 	src="/assets/projects/projects.webm"
 >
 	Find skills in action by <strong>uncovering</strong> our projects and the team
@@ -109,7 +108,7 @@
 </Hero>
 
 <Section>
-	<TextHeader>Everything in one place.</TextHeader>
+	<Header>Everything in one place</Header>
 
 	<Text>
 		Team Tomorrow has used a wide variety of technologies and used a broad
@@ -121,7 +120,7 @@
 </Section>
 
 <Section filled={true}>
-	<MajorHeader>Our Projects</MajorHeader>
+	<Header>Our Projects</Header>
 
 	<div class="flex flex-col gap-4 max-w-screen-lg mx-auto w-full">
 		<FilterTitle />
@@ -148,18 +147,19 @@
 			radio={false}
 			required={false}
 			options={techSkills}
-			selectedItems={[]}
+			groupSelected={[]}
 			on:change={onSearch}
 		>
-			<Wrench class="h-8 w-8" />
+			<Wrench class="h-6 w-6" />
 		</Dropdown>
 
-		<Seperator />
+		<Separator />
 
-		<div class="h-[70rem]">
+		<div class="min-h-[87rem]">
 			<Scrollable
-				class="before:from-gray-900 after:to-gray-900"
 				arrows={true}
+				class="before:from-gray-900 after:to-gray-900"
+				innerClass="gap-5"
 			>
 				{#await request}
 					<div
@@ -210,7 +210,7 @@
 						in:fly={{ duration: 300, y: 30 }}
 						class="text-center font-semibold text-2xl"
 					>
-						No results
+						No Results
 					</h1>
 				{/await}
 			</div>

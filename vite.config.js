@@ -1,7 +1,15 @@
 import { wss } from "./src/wss";
+import { defineConfig } from "vite";
+import tailwindcss from "tailwindcss";
+import autoprefixer from "autoprefixer";
 import { sveltekit } from "@sveltejs/kit/vite";
 
-/** @type {import("vite").UserConfig} */
-export default {
-	plugins: [sveltekit(), wss]
-};
+export default defineConfig(({ mode }) => ({
+	plugins: [sveltekit(), wss(mode)],
+	logLevel: mode === "production" ? "silent" : "info",
+	css: {
+		postcss: {
+			plugins: [tailwindcss(), autoprefixer()]
+		}
+	}
+}));

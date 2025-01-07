@@ -1,4 +1,10 @@
-import type { Team, Position, SoftSkill, TechSkill } from "@prisma/client";
+import type {
+	Team,
+	Position,
+	SoftSkill,
+	TechSkill,
+	Role
+} from "@prisma/client";
 
 // These are arrays of schema enums for generating (mostly) dropdown content for slection.
 // They should stay updated with the schema at all times. It is also used for TypeScript
@@ -42,7 +48,8 @@ export const softSkills: SoftSkill[] = [
 	"Initiative",
 	"Adaptable",
 	"Perserverance",
-	"Meticulous"
+	"Meticulous",
+	"Resourceful"
 ];
 
 export const techSkills: TechSkill[] = [
@@ -137,13 +144,20 @@ export const techSkills: TechSkill[] = [
 	"Tokio",
 	"Yew",
 	"Tailscale",
-	"Analytics"
+	"Analytics",
+	"CAD",
+	"Networking",
+	"Expo",
+	"React_Native"
 ];
+
+export const roles: Role[] = ["Admin", "Lead", "User"];
 
 // Enum for date dropdowns
 export enum DateOption {
 	Week = "Last 7 days",
-	Month = "Last 30 days",
+	Month = "Last month",
+	Half = "Last 6 months",
 	Year = "Last 12 months",
 	Custom = "Custom"
 }

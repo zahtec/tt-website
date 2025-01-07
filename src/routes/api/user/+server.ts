@@ -1,9 +1,9 @@
 import { error } from "@sveltejs/kit";
 
-import { prisma, checkSession, userAuth } from "$lib/prisma";
+import { prisma, userAuth } from "$lib/prisma";
 
+import type { Prisma } from "@prisma/client";
 import type { RequestHandler } from "./$types";
-import type { Endorsement, Prisma } from "@prisma/client";
 
 // Request handlers for managing user data in prisma, it uses the users session token to verify the API call
 
@@ -11,42 +11,56 @@ import type { Endorsement, Prisma } from "@prisma/client";
 // * INPUT: UserUpdateRequest
 // * OUTPUT: None
 export const PATCH: RequestHandler = async ({ locals, request }) => {
-	const session = await checkSession(locals);
-
-	// If the session token is invalid, throw unauthorized
-	if (!session) throw error(401, "Unauthorized");
+	const user = (await userAuth(locals, true))!;
 
 	const data: App.UserUpdateRequest = await request.json().catch(() => {
 		throw error(400, "Bad Request");
 	});
 
-	// If the token isn't the same as for the user they are updating, throw unauthorized
-	if (data.id !== session.userId) throw error(401, "Unauthorized");
+	// If the token isn't the same as for the user they are updating and they aren't an admin, throw unauthorized
+	if (data.id !== user.id && user.role !== "Admin")
+		throw error(401, "Unauthorized");
 
 	try {
 		// Input validation
 		if (
+			(data.role !== user.role &&
+				(user.role !== "Admin" || data.role === "Admin")) ||
 			(data.name &&
 				(data.name.length > 25 ||
 					data.name.length < 1 ||
-					/[^a-zA-Z\s]/g.test(data.name))) ||
+					/[^a-zA-Z\s-]/g.test(data.name))) ||
 			(data.positions &&
 				(data.positions.length < 2 || data.positions.length > 4)) ||
 			(data.softSkills &&
 				(data.softSkills.length < 2 || data.softSkills.length > 5)) ||
 			(data.techSkills &&
-				(data.techSkills.length < 2 || data.techSkills.length > 5))
+				(data.techSkills.length < 2 || data.techSkills.length > 5)) ||
+			(data.homepage &&
+				data.homepage !== user.homepage &&
+				(await prisma.user.count({ where: { homepage: true } })) === 3)
 		)
 			throw error(400, "Bad Request");
 
 		const name = data.name?.trim();
+		const url = name?.toLowerCase().replaceAll(/\s+/g, "-");
+
+		// Check if the user has the same URL as another and throw an error if so
+		if (
+			url &&
+			(await prisma.user.count({ where: { url, id: { not: data.id } } }))
+		)
+			return new Response(undefined, {
+				status: 205
+			});
 
 		// Update the user
 		await prisma.user.update({
 			where: { id: data.id },
 			data: {
 				name,
-				url: name?.toLowerCase().replaceAll(" ", "-"),
+				url,
+				role: data.role,
 				about: data.about?.trim(),
 				team: data.team,
 				positions: data.positions,
@@ -54,6 +68,7 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
 				techSkills: data.techSkills,
 				pinnedProjectId: data.pinnedProjectId,
 				visible: data.visible,
+				homepage: data.homepage,
 				links: {
 					update: {
 						GitHub: data.links?.GitHub,
@@ -68,73 +83,60 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
 		});
 
 		return new Response(undefined, { status: 200 });
-	} catch {
+	} catch (e) {
+		console.log(e);
 		throw error(400, "Bad Request");
 	}
 };
 
-// Search for users, otherwise a +page.server.ts should be used
+// Search for users
 // * INPUT: where=Prisma.UserWhereInput
-// * OUTPUT:
+// * OUTPUT: UserWithMetadata[]
 export const GET: RequestHandler = async ({ request }) => {
 	try {
-		// Grab users using request
-		const users = await prisma.user.findMany({
-			where: JSON.parse(
-				new URL(request.url).searchParams.get("where")!
-			) as Prisma.UserWhereInput,
-			include: {
-				links: {
-					select: {
-						userId: false,
-						Devto: true,
-						Facebook: true,
-						GitHub: true,
-						LinkedIn: true,
-						Twitter: true,
-						Website: true
+		return new Response(
+			JSON.stringify(
+				await prisma.user.findMany({
+					where: JSON.parse(
+						new URL(request.url).searchParams.get("where")!
+					) as Prisma.UserWhereInput,
+					include: {
+						links: {
+							select: {
+								userId: false,
+								Devto: true,
+								Facebook: true,
+								GitHub: true,
+								LinkedIn: true,
+								Twitter: true,
+								Website: true
+							}
+						},
+						pinnedProject: true
+					},
+					orderBy: {
+						lastUpdated: "desc"
 					}
-				},
-				pinnedProject: true,
-				endorsementsReceived: {
-					distinct: ["softSkill", "techSkill"]
-				},
-				_count: {
-					select: {
-						projects: true
-					}
-				}
-			}
-		});
-
-		(
-			users as (Omit<typeof users[0], "endorsementsReceived"> & {
-				_count: { endorsements: number };
-				endorsementsReceived?: Endorsement[];
-			})[]
-		).map((user) => {
-			user._count.endorsements = user.endorsementsReceived!.length;
-
-			delete user.endorsementsReceived;
-		});
-
-		return new Response(JSON.stringify(users), { status: 200 });
+				})
+			),
+			{ status: 200 }
+		);
 	} catch {
 		throw error(400, "Bad Request");
 	}
 };
 
-// Add/remove endorsements on one of a user's skills
+// Add or remove endorsements on one of a user's skills
 // * INPUT: EndorsementRequest
 // * OUTPUT: EndorsementWithMetadata | undefined
 export const POST: RequestHandler = async ({ locals, request }) => {
-	const user = await userAuth(locals);
-
-	// Only allow Leads and Admins to endorse
-	if (!user || user.role === "User") throw error(401, "Unauthorized");
+	const user = (await userAuth(locals, true))!;
 
 	try {
 		const data: App.EndorsementRequest = await request.json();
+
+		// Don't let the user control their own endorsements
+		if (data.id === user.id) throw error(400, "Bad Request");
 
 		if (data.endorsing) {
 			const type = data.softSkill ? "softSkill" : "techSkill";
@@ -165,7 +167,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 			)
 				throw error(400, "Bad Request");
 
-			const endorsement = await prisma.endorsement.create({
+			const { id, from } = await prisma.endorsement.create({
 				data: {
 					fromId: user.id,
 					toId: data.id as string,
@@ -182,19 +184,9 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 				}
 			});
 
-			return new Response(
-				JSON.stringify({
-					id: endorsement.id,
-					from: {
-						id: endorsement.from.id,
-						url: endorsement.from.url,
-						name: endorsement.from.name
-					}
-				}),
-				{
-					status: 200
-				}
-			);
+			return new Response(JSON.stringify({ id, from }), {
+				status: 200
+			});
 		} else {
 			await prisma.endorsement.delete({
 				where: { id: data.id as number }

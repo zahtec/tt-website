@@ -1,9 +1,16 @@
 import { redirect } from "@sveltejs/kit";
 
 import { prisma } from "$lib/prisma";
+import { dev } from "$app/environment";
 import { env } from "$env/dynamic/private";
 
 import type { RequestHandler } from "./$types";
+
+const redirectUri = dev
+	? "http://localhost:5173/login"
+	: "https://teamtomorrow.com/login";
+
+const redirectUriEncoded = encodeURIComponent(redirectUri);
 
 export const GET: RequestHandler = async (request) => {
 	// Date used for determining session expiry
@@ -30,15 +37,13 @@ export const GET: RequestHandler = async (request) => {
 		request.cookies.get("state") === url.searchParams.get("state")
 	) {
 		// Get API token from OAuth code
-		// TODO: Switch to actual redirect URI for production
-
 		const token = (
 			await fetch("https://discord.com/api/v10/oauth2/token", {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/x-www-form-urlencoded"
 				},
-				body: `client_id=${env.DISCORD_ID}&client_secret=${env.DISCORD_SECRET}&grant_type=authorization_code&code=${code}&redirect_uri=http://localhost:5173/login`
+				body: `client_id=${env.DISCORD_ID}&client_secret=${env.DISCORD_SECRET}&grant_type=authorization_code&code=${code}&redirect_uri=${redirectUri}`
 			})
 				.then((res) => res.json())
 				.catch(() => {
@@ -46,7 +51,7 @@ export const GET: RequestHandler = async (request) => {
 				})
 		).access_token as string;
 
-		// Get the users info from Discor. If an error occurs fetching the user data, its
+		// Get the users info from Discord. If an error occurs fetching the user data, its
 		// most likely an invalid token, so redirect back to the login
 		const { id, username, avatar } = (await fetch(
 			"https://discord.com/api/v10/users/@me",
@@ -58,7 +63,7 @@ export const GET: RequestHandler = async (request) => {
 		)
 			.then((res) => res.json())
 			.catch(() => {
-				throw redirect(302, "/discord");
+				throw redirect(302, "/login");
 			})) as {
 			id: string;
 			username: string;
@@ -71,6 +76,17 @@ export const GET: RequestHandler = async (request) => {
 		});
 
 		if (!prismaUser) {
+			// Check if the user is eligible to create an account, if not, redirect
+			// them to the home page
+			if (
+				!(
+					await fetch(
+						`https://ai-camp-data-layer.fly.dev/istt/${id}`
+					).then((res) => res.json())
+				).isTT
+			)
+				throw redirect(302, "/");
+
 			// If the user doesnt exist, create them
 			prismaUser = await prisma.user.create({
 				data: {
@@ -90,14 +106,13 @@ export const GET: RequestHandler = async (request) => {
 			// Give them the default profile picture and banner on Cloudflare Images
 			const body = new FormData();
 
-			// TODO: Replace URL for production
 			// Append the appropriate data, try to use the discord avatar if possible
 			body.append("id", "avatar-" + id);
 			body.append(
 				"url",
 				avatar
-					? "https://tt-alpha.fly.dev/assets/default/avatar.webp"
-					: `https://cdn.discordapp.com/avatars/${id}/${avatar}.webp`
+					? `https://cdn.discordapp.com/avatars/${id}/${avatar}.webp`
+					: "https://teamtomorrow.com/assets/default/avatar.webp"
 			);
 
 			// Add avatar
@@ -112,11 +127,10 @@ export const GET: RequestHandler = async (request) => {
 				}
 			);
 
-			// TODO: Replace URL for production
 			body.set("id", "banner-" + id);
 			body.set(
 				"url",
-				"https://tt-alpha.fly.dev/assets/default/banner.webp"
+				"https://teamtomorrow.com/assets/default/banner.webp"
 			);
 
 			// Add banner
@@ -138,21 +152,18 @@ export const GET: RequestHandler = async (request) => {
 			});
 		}
 
-		// Create a new session for the user, if the session token somehow already exists, recursively generate a new one
-		const createSession = async (): Promise<string> => {
-			return await prisma.session
-				.create({
+		// Create a session and set the session cookie, also remove the state cookie
+		request.cookies.set(
+			"session",
+			(
+				await prisma.session.create({
 					data: { userId: id }
 				})
-				.then((session) => session.token)
-				.catch(() => createSession());
-		};
+			).token,
+			{ maxAge: 604800, path: "/" }
+		);
 
-		const session = await createSession();
-
-		// Set session cookie and remove state cookie
-		request.cookies.set("session", session, { maxAge: 604800 });
-		request.cookies.set("state", "", { maxAge: 0 });
+		request.cookies.delete("state", { path: "/login" });
 
 		// Redirect to the main dashboard page
 		throw redirect(302, "/dashboard");
@@ -166,11 +177,10 @@ export const GET: RequestHandler = async (request) => {
 			path: "/login"
 		});
 
-		// Redirect to oauth screen with state
-		// TODO: Switch to actual redirect URI for production
+		// Redirect to OAuth screen with state
 		throw redirect(
 			302,
-			`https://discord.com/api/oauth2/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A5173%2Flogin&response_type=code&scope=identify&client_id=${env.DISCORD_ID}&state=${state}`
+			`https://discord.com/api/oauth2/authorize?redirect_uri=${redirectUriEncoded}&response_type=code&scope=identify&client_id=${env.DISCORD_ID}&state=${state}`
 		);
 	}
 };

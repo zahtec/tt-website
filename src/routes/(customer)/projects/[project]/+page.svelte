@@ -1,8 +1,7 @@
 <script lang="ts">
-	import "$lib/hljsTheme.css";
+	import "$lib/tiptap/hljsTheme.css";
 
 	import hljs from "highlight.js/lib/core";
-	import { generateHTML } from "@tiptap/html";
 	import { onMount, getContext } from "svelte";
 	import c from "highlight.js/lib/languages/c";
 	import go from "highlight.js/lib/languages/go";
@@ -23,15 +22,18 @@
 	import kotlin from "highlight.js/lib/languages/kotlin";
 	import csharp from "highlight.js/lib/languages/csharp";
 	import graphql from "highlight.js/lib/languages/graphql";
+	import { generateHTML, generateText } from "@tiptap/core";
 	import markdown from "highlight.js/lib/languages/markdown";
 	import typescript from "highlight.js/lib/languages/typescript";
 	import javascript from "highlight.js/lib/languages/javascript";
 
 	import { getIcon } from "$lib/getIcon";
-	import { extensions } from "$lib/tiptapExtensions";
+	import Author from "../../Author.svelte";
+	import { breadcrumb, article } from "$lib/seo";
 	import Button from "$lib/components/Button.svelte";
-	import Author from "$lib/components/Author.svelte";
-	import Seperator from "$lib/components/Seperator.svelte";
+	import { extensions } from "$lib/tiptap/extensions";
+	import Separator from "$lib/components/Separator.svelte";
+	import { PUBLIC_CLOUDFLARE_URL } from "$env/static/public";
 	import Scrollable from "$lib/components/Scrollable.svelte";
 
 	import type { PageData } from "./$types";
@@ -85,10 +87,50 @@
 
 <svelte:head>
 	<title>{data.title} / Team Tomorrow</title>
+
+	<meta name="description" content={data.description} />
+
+	<!-- OpenGraph data with user info -->
+	<meta property="og:title" content="{data.title} / Team Tomorrow" />
+	<meta name="og:description" content={data.description} />
+	<meta
+		name="og:image"
+		content="{PUBLIC_CLOUDFLARE_URL}/banner-{data.id}/banner"
+	/>
+	<meta
+		name="og:image:secure_url"
+		content="{PUBLIC_CLOUDFLARE_URL}/banner-{data.id}/banner"
+	/>
+	<meta name="og:image:width" content="512" />
+	<meta name="og:image:height" content="512" />
+	<meta name="og:image:alt" content="Banner for '{data.title}'" />
+
+	<!-- Twitter card data with user info -->
+	<meta property="twitter:title" content="{data.title} / Team Tomorrow" />
+	<meta name="twitter:description" content={data.description} />
+	<meta
+		name="twitter:image"
+		content="{PUBLIC_CLOUDFLARE_URL}/banner-{data.id}/banner"
+	/>
+
+	{@html breadcrumb(data.title, data.url, "projects")}
+	{@html article(
+		data.title,
+		data.description,
+		data.url,
+		data.id,
+		// Typing isn't supported in Svelte HTML
+		// @ts-ignore
+		data.authors.find(({ user }) => user.id === data.ownerId).user.name,
+		data.date.toISOString(),
+		data.skills.join(", "),
+		// @ts-ignore
+		generateText(data.content, extensions)
+	)}
 </svelte:head>
 
 <img
-	src="https://imagedelivery.net/XcWbJUZNkBuRbJx1pRJDvA/banner-{data.id}/banner?{timestamp}"
+	src="{PUBLIC_CLOUDFLARE_URL}/banner-{data.id}/banner?{timestamp}"
 	width="1920"
 	height="1080"
 	alt="Banner for '{data.title}'"
@@ -96,27 +138,31 @@
 	style="border-color: #{data.theme}"
 />
 
-<div class="p-4 max-w-2xl mx-auto lg:max-w-3xl">
+<div class="flex flex-col gap-6 p-4 max-w-2xl mx-auto lg:max-w-3xl">
 	<div class="flex justify-between items-center">
 		<p>{data.date.toLocaleDateString("en-US")}</p>
 		<div class="flex gap-2">
-			{#each data.skills as skill}
-				<svelte:component this={getIcon(skill)} class="w-8 h-8" />
+			{#each data.skills as skill (skill)}
+				<svelte:component this={getIcon(skill)} class="w-6 h-6" />
 			{/each}
 		</div>
 	</div>
 
-	<h1 class="font-bold text-3xl my-6" style="color: #{data.theme}">
+	<h1 class="font-bold text-3xl break-words">
 		{data.title}
 	</h1>
 
-	<Scrollable class="before:from-black after:to-black">
-		{#each data.authors as author}
+	<p>
+		{data.description}
+	</p>
+
+	<Scrollable class="before:from-black after:to-black" innerClass="gap-7">
+		{#each data.authors as author (author.user.id)}
 			<Author theme={data.theme} {author} />
 		{/each}
 	</Scrollable>
 
-	<Seperator class="mt-4 mb-10" />
+	<Separator class="-mt-4 mb-4" />
 
 	<div class="mb-12 [&>p:empty]:h-6">
 		{@html html}

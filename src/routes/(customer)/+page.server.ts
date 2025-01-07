@@ -3,30 +3,44 @@ import { getProjects, prisma } from "$lib/prisma";
 import type { PageServerLoad } from "./$types";
 
 // Grab the author data and descriptions for the 4 selected projects on the landing page as well as
-// the user data for the 3 selected developers
+// the user data for the 3 selected developers. All projects with their URL's are grabbed for generating
+// structured card data for SEO
 export const load: PageServerLoad<{
 	projects: App.ProjectWithMetadata[];
 	developers: App.Developer[];
+	items: string[];
 }> = async () => {
-	const projects = await getProjects({
-		url: {
-			in: ["hippo2", "ai-camp-bot", "this-website", "ai-on-thumbs"]
-		}
-	});
-
-	// TODO: Add top 3 developer's Discord ids to the database and use them here
-	const developers = await prisma.user.findMany({
-		where: {
-			id: {
-				in: ["340324858405847042"]
+	return {
+		projects: await getProjects({
+			url: {
+				in: [
+					"hippo2",
+					"ai-camp-bot",
+					"team-tomorrow-website",
+					"ai-on-thumbs"
+				]
 			}
-		},
-		select: {
-			name: true,
-			id: true,
-			about: true
-		}
-	});
+		}),
 
-	return { projects, developers };
+		developers: await prisma.user.findMany({
+			where: {
+				homepage: true
+			},
+			select: {
+				name: true,
+				team: true,
+				id: true,
+				about: true,
+				softSkills: true,
+				techSkills: true
+			}
+		}),
+
+		items: (
+			await prisma.project.findMany({
+				select: { url: true },
+				orderBy: { date: "desc" }
+			})
+		).map(({ url }) => url)
+	};
 };

@@ -5,6 +5,7 @@ module.exports = {
 	content: [
 		"./src/**/*.{html,svelte}",
 		"./src/lib/tiptapExtensions.ts",
+		"./src/lib/link.ts",
 		"./src/lib/enums.ts"
 	],
 	theme: {
@@ -55,6 +56,9 @@ module.exports = {
 				lg: "1024px",
 				"3xl": "1600px"
 			},
+			spacing: {
+				18: "4.5rem"
+			},
 			backgroundImage: {
 				"gradient-radial":
 					"radial-gradient(var(--tw-gradient-from) 30%, var(--tw-gradient-to))",
@@ -62,29 +66,39 @@ module.exports = {
 					"conic-gradient(var(--tw-gradient-from), var(--tw-gradient-to))"
 			},
 			transitionProperty: {
-				widpad: "width, padding",
-				border: "border, border-radius"
+				border: "border, border-radius",
+				transpacity: "transform, opacity",
+				backpacity: "background-color, opacity",
+				transform: "transform, width, height, margin, padding"
 			},
 			inset: {
-				18: "4.5rem",
 				0.5: "0.125rem"
 			},
 			lineHeight: {
 				14: "3.5rem"
 			},
 			height: {
-				15: "3.75rem",
 				100: "25rem",
-				104: "26rem"
+				104: "26rem",
+				120: "30rem"
 			},
 			minHeight: {
-				72: "18rem"
+				44: "11rem",
+				52: "13rem",
+				112: "28rem",
+				116: "29rem",
+				120: "30rem"
+			},
+			minWidth: {
+				40: "10rem"
 			},
 			maxWidth: {
+				40: "10rem",
+				44: "11rem",
 				60: "15rem"
 			},
-			padding: {
-				18: "4.5rem"
+			borderRadius: {
+				"4xl": "2rem"
 			},
 			animation: {
 				grays: "grays 2s cubic-bezier(0.4, 0, 0.6, 1) infinite"
@@ -102,5 +116,8 @@ module.exports = {
 			}
 		}
 	},
-	plugins: []
+	plugins: [],
+	experimental: {
+		optimizeUniversalDefaults: true
+	}
 };

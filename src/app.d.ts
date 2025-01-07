@@ -9,7 +9,8 @@ import type {
 	TechSkill,
 	Team,
 	SoftSkill,
-	Endorsement
+	Endorsement,
+	Role
 } from "@prisma/client";
 
 declare global {
@@ -22,29 +23,21 @@ declare global {
 		// Interface for the landing page developer cards
 		interface Developer {
 			id: string;
+			team: Team | null;
 			name: string;
 			about: string;
+			softSkills: SoftSkill[];
+			techSkills: TechSkill[];
 		}
 
 		// Type for removing the relational userId property from the links model
 		type UserLinks = Omit<Links, "userId">;
 
-		// Type for combining a user with their associated links and pinned project. Used for the
-		// dashboard initial load
+		// Type for combining a user with their associated links and pinned project
 		type UserWithMetadata = User & {
 			links: UserLinks;
 			pinnedProject: Project?;
 			endorsementsReceived: Endorsement[];
-		};
-
-		// Type for response data from a user search
-		type UserSearchResponse = User & {
-			links: UserLinks;
-			pinnedProject: Project?;
-			_count: {
-				projects: number;
-				endorsements: number;
-			};
 		};
 
 		// Interface of a stripped down User object for endorsers on the profile page
@@ -57,6 +50,7 @@ declare global {
 		// Interface for user update requests
 		interface UserUpdateRequest {
 			id: string;
+			role?: Role;
 			name?: string;
 			about?: string;
 			team?: Team;
@@ -66,14 +60,26 @@ declare global {
 			links?: UserLinks;
 			pinnedProjectId?: string;
 			visible?: boolean;
+			homepage?: boolean;
 		}
 
 		// Type for authors on projects
-		type Author = { user: User; position: Position };
+		type Author = {
+			user: Pick<User, "id" | "name" | "url">;
+			position: Position;
+		};
+
+		// Type used for keeping track of images in the project editor
+		type Image = { id?: string; data: number[]; urls: string[] };
 
 		// Projects combined with their authors for easy access
 		type ProjectWithMetadata = Project & {
 			authors: Author[];
+		};
+
+		// Project with dates encoded as strings for yjs collaboration state
+		type SharedProject = Omit<App.ProjectWithMetadata, "date"> & {
+			date: string;
 		};
 
 		// Interface for project update requests
@@ -81,18 +87,17 @@ declare global {
 			id: string;
 			title?: string;
 			description?: string;
-			theme?: string;
 			date?: Date;
 			skills?: TechSkill[];
 			content?: Prisma.InputJsonValue;
-			images: string[];
+			images: Record<string, Image | string>;
 			visible?: boolean;
 			authors?: Author[];
 		}
 
-		// Interface for response data after updating a project
+		// Interface for project update response data
 		interface ProjectUpdateResponse {
-			error?: string;
+			images: Record<string, string>;
 			url: string;
 		}
 
@@ -109,7 +114,7 @@ declare global {
 		// Type for graph data that will be plotted
 		type GraphData = { label: string; value: number; color: string };
 
-		// Interface for analytics response data
+		// Interface for personal analytics response data
 		interface AnalyticsResponse {
 			returning: number;
 			new: number;
@@ -127,19 +132,33 @@ declare global {
 			};
 		}
 
+		// Interface for user manager analytics response data
+		interface UsersAnalyticsResponse {
+			[id: string]: {
+				new: number;
+				returning: number;
+			};
+		}
+
 		// Interface for contact form email requests
 		interface MailRequest {
+			[key: string]: MailRequest[keyof MailRequest];
 			firstName: string;
 			lastName: string;
 			email: string;
 			phone?: string;
 			company: string;
 			talent: string[];
-			website?: string;
+			website: string;
 			doing: string;
 			refer?: string;
 			subject: string;
 			message: string;
+			developers: {
+				id: string;
+				name: string;
+				url: string;
+			}[];
 		}
 
 		// Interface for contact form response data
@@ -157,7 +176,25 @@ declare global {
 
 		// Interface for image upload response data
 		interface ImageUploadResponse {
-			id: string;
+			id?: string;
+			theme?: string;
+		}
+
+		// Interface for a singular kudo with stripped data
+		interface Kudo {
+			senderId: string;
+			receiverId: string;
+			senderName: string;
+			receiverName: string;
+			reason: string;
+			timestamp: Date;
+		}
+
+		// Interface for kudos response data
+		interface KudosResponse {
+			pages: number;
+			page: number;
+			kudos: App.Kudo[];
 		}
 
 		// interface Platform {}

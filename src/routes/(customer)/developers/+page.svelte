@@ -2,27 +2,26 @@
 	import { onMount } from "svelte";
 	import { fly } from "svelte/transition";
 
+	import Hero from "../Hero.svelte";
+	import Header from "../Header.svelte";
+	import Section from "../Section.svelte";
+	import HireStep from "./HireStep.svelte";
+	import Developer from "./Developer.svelte";
 	import Text from "$lib/components/Text.svelte";
-	import Hero from "$lib/components/Hero.svelte";
+	import FilterTitle from "../FilterTitle.svelte";
+	import DeveloperFilter from "./DevFilter.svelte";
+	import Star from "$lib/icons/general/Star.svelte";
 	import { softSkills, techSkills } from "$lib/enums";
+	import Wrench from "$lib/icons/general/Wrench.svelte";
 	import Dropdown from "$lib/components/Dropdown.svelte";
-	import Seperator from "$lib/components/Seperator.svelte";
+	import Separator from "$lib/components/Separator.svelte";
 	import SearchBar from "$lib/components/SearchBar.svelte";
-	import TextHeader from "$lib/components/TextHeader.svelte";
 	import Scrollable from "$lib/components/Scrollable.svelte";
-	import Section from "$lib/components/index/Section.svelte";
-	import FilterTitle from "$lib/components/FilterTitle.svelte";
-	import MajorHeader from "$lib/components/MajorHeader.svelte";
-	import Star from "$lib/components/icons/general/Star.svelte";
 	import DevTagLoading from "$lib/components/DevTagLoading.svelte";
-	import Wrench from "$lib/components/icons/general/Wrench.svelte";
-	import HireStep from "$lib/components/developers/index/HireStep.svelte";
-	import Developer from "$lib/components/developers/index/Developer.svelte";
-	import DeveloperFilter from "$lib/components/developers/index/DevFilter.svelte";
 
 	import type { PageData } from "./$types";
 	import type { AnalyticsInstance } from "analytics";
-	import type { SoftSkill, TechSkill } from "@prisma/client";
+	import type { Prisma, SoftSkill, TechSkill } from "@prisma/client";
 
 	export let data: PageData;
 
@@ -31,7 +30,7 @@
 	let softSkillFilter: SoftSkill[] = [];
 	let techSkillFilter: TechSkill[] = [];
 	let analytics: AnalyticsInstance | undefined;
-	let request: Promise<App.UserSearchResponse[]> = new Promise(() => {});
+	let request: Promise<App.UserWithMetadata[]> = new Promise(() => {});
 
 	// On search set request to never resolve so the loading animation is shown before the debounce
 	$: search, (request = new Promise(() => {}));
@@ -53,10 +52,10 @@
 						? { hasEvery: techSkillFilter }
 						: undefined,
 					visible: true
-				})}`
+				} as Prisma.UserWhereInput)}`
 			)
 				.then((res) => res.json())
-				.then(async (users: App.UserSearchResponse[]) => {
+				.then(async (users: App.UserWithMetadata[]) => {
 					// Random search sampling so the search data isn't spammed
 					if (
 						analytics &&
@@ -73,6 +72,16 @@
 		);
 	};
 
+	// Track if a user was clicked on and what filters were used
+	const trackUser = async (id: string) =>
+		analytics &&
+		(softSkillFilter.length || techSkillFilter.length) &&
+		(await analytics.track("user_click", {
+			id,
+			soft_skills: softSkillFilter,
+			tech_skills: techSkillFilter
+		}));
+
 	// Once mounted check if there's any URL search params, if so, input them
 	onMount(async () => {
 		const param = new URLSearchParams(window.location.search).get("search");
@@ -84,16 +93,6 @@
 			.then(({ analytics }) => analytics)
 			.catch(() => undefined);
 	});
-
-	// Track if a user was clicked on and what filters were used
-	const trackUser = async (id: string) =>
-		analytics &&
-		(softSkillFilter.length || techSkillFilter.length) &&
-		(await analytics.track("user_click", {
-			id,
-			soft_skills: softSkillFilter,
-			tech_skills: techSkillFilter
-		}));
 </script>
 
 <svelte:head>
@@ -102,7 +101,7 @@
 
 <Hero
 	class="from-blue-light to-blue-dark"
-	title="Discover who can push you forward."
+	title="Discover who can push you forward"
 	src="/assets/developers/developers.webm"
 >
 	See who fits your needs the most and <strong>propel</strong>
@@ -110,7 +109,7 @@
 </Hero>
 
 <Section>
-	<TextHeader>So, where do I get started?</TextHeader>
+	<Header>So, where do I get started?</Header>
 
 	<Text>
 		We have a simple 3 step process that will get your team up and going in
@@ -119,10 +118,10 @@
 	</Text>
 
 	<div
-		class="bg-gray-500/40 p-5 mt-4 rounded-lg flex flex-col gap-8 mb-12 max-w-xl mx-auto"
+		class="bg-gray-900 p-5 mt-4 rounded-lg flex flex-col gap-8 mb-12 max-w-xl mx-auto"
 	>
 		<HireStep
-			title="Search and discover."
+			title="Search and discover"
 			src="/assets/developers/find.webp"
 			alt="Developer profiles stacked ontop of eachother"
 		>
@@ -130,10 +129,10 @@
 			through our team members below to pinpoint your ideal candidates.
 		</HireStep>
 
-		<Seperator />
+		<Separator />
 
 		<HireStep
-			title="Evaluate options."
+			title="Evaluate options"
 			side="right"
 			src="/assets/developers/stats.webp"
 			alt="Developer profile with statistics bars"
@@ -143,10 +142,10 @@
 			intrigues you most.
 		</HireStep>
 
-		<Seperator />
+		<Separator />
 
 		<HireStep
-			title="Create a contract and blastoff."
+			title="Create a contract and blastoff"
 			src="/assets/developers/send.webp"
 			alt="Developer profile with statistics bars"
 		>
@@ -158,7 +157,7 @@
 </Section>
 
 <Section filled={true}>
-	<MajorHeader>Search Developers</MajorHeader>
+	<Header>Search Developers</Header>
 
 	<div class="max-w-screen-lg mx-auto w-full flex flex-col gap-4">
 		<FilterTitle />
@@ -186,10 +185,10 @@
 				radio={false}
 				required={false}
 				options={softSkills}
-				selectedItems={[]}
+				groupSelected={[]}
 				on:change={onSearch}
 			>
-				<Star class="h-8 w-8" />
+				<Star class="h-6 w-6" />
 			</Dropdown>
 
 			<Dropdown
@@ -197,19 +196,20 @@
 				radio={false}
 				required={false}
 				options={techSkills}
-				selectedItems={[]}
+				groupSelected={[]}
 				on:change={onSearch}
 			>
-				<Wrench class="h-8 w-8" />
+				<Wrench class="h-6 w-6" />
 			</Dropdown>
 		</div>
 
-		<Seperator />
+		<Separator />
 
-		<div class="min-h-[133rem] md:min-h-[96rem]">
+		<div class="min-h-[165rem] md:min-h-[106rem] lg:min-h-[101rem]">
 			<Scrollable
-				class="before:from-gray-900 after:to-gray-900"
 				arrows={true}
+				class="before:from-gray-900 after:to-gray-900"
+				innerClass="gap-5"
 			>
 				{#await request}
 					<div
@@ -233,7 +233,7 @@
 						<div class="rounded-full bg-gray-400 w-32 h-5" />
 					</div>
 				{:then users}
-					{#each users as user, i}
+					{#each users as user, i (user.id)}
 						<DeveloperFilter
 							{user}
 							current={page === i}
@@ -258,7 +258,7 @@
 						>
 							<div class="w-20 h-20 bg-gray-400 rounded-full" />
 							<div
-								class="flex flex-col gap-2 items-center text-center md:flex-col-reverse md:text-start md:items-start"
+								class="flex flex-col gap-3 items-center text-center md:gap-2 md:flex-col-reverse md:text-start md:items-start"
 							>
 								<div
 									class="rounded-full h-4 w-24 bg-gray-400 md:mt-0.5"
@@ -266,6 +266,9 @@
 
 								<div
 									class="rounded-full h-7 w-60 bg-gray-400"
+								/>
+								<div
+									class="rounded-full h-7 w-40 bg-gray-400 md:hidden"
 								/>
 							</div>
 						</div>
@@ -277,6 +280,7 @@
 							<div class="rounded-sm h-2 w-full bg-gray-400" />
 							<div class="rounded-sm h-2 w-full bg-gray-400" />
 							<div class="rounded-sm h-2 w-full bg-gray-400" />
+							<div class="rounded-sm h-2 w-full bg-gray-400" />
 							<div class="rounded-sm h-2 w-32 bg-gray-400" />
 						</div>
 
@@ -284,10 +288,10 @@
 							<div class="rounded-full h-5 w-44 bg-gray-400" />
 
 							<div
-								class="bg-gray-800 shrink-0 w-full rounded-lg p-3 pt-0 mb-5 min-h-72 md:min-h-[15rem] lg:flex lg:min-h-[12rem] lg:p-4"
+								class="bg-gray-800 shrink-0 w-full rounded-lg p-3 pt-0 mb-5 min-h-112 md:min-h-[15rem] lg:flex lg:min-h-[12rem] lg:p-4"
 							>
 								<div
-									class="h-32 md:h-24 bg-gray-400 -mx-3 border-t-4 border-gray-500/40 rounded-t-lg lg:w-24 lg:h-auto lg:rounded-lg lg:mx-0 lg:shrink-0 lg:border-none"
+									class="h-32 md:h-24 bg-gray-400 -mx-3 border-t-4 border-gray-900 rounded-t-lg lg:w-24 lg:h-auto lg:rounded-lg lg:mx-0 lg:shrink-0 lg:border-none"
 								/>
 								<div
 									class="flex flex-col gap-4 mt-3 lg:ml-2 lg:w-full"
@@ -357,7 +361,7 @@
 						</div>
 					</div>
 				{:then users}
-					{#each users as user, i}
+					{#each users as user, i (user.id)}
 						{#if page === i}
 							<Developer
 								on:click={async () => await trackUser(user.id)}
@@ -370,7 +374,7 @@
 						in:fly={{ duration: 300, y: 30 }}
 						class="text-center font-semibold text-2xl"
 					>
-						No results
+						No Results
 					</h1>
 				{/await}
 			</div>

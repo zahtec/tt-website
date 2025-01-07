@@ -1,71 +1,77 @@
 <script lang="ts">
+	import { user } from "$lib/stores";
+	import Graph from "./Graph.svelte";
+	import DataKey from "./DataKey.svelte";
 	import { tweened } from "svelte/motion";
 	import { DateOption } from "$lib/enums";
+	import DashHero from "../DashHero.svelte";
+	import DashWrap from "../DashWrap.svelte";
 	import { quintInOut } from "svelte/easing";
+	import Comparison from "./Comparison.svelte";
+	import DashButton from "../DashButton.svelte";
+	import DashSection from "../DashSection.svelte";
+	import GraphLoading from "./GraphLoading.svelte";
 	import DevTag from "$lib/components/DevTag.svelte";
-	import DashHero from "$lib/components/dashboard/DashHero.svelte";
-	import DashWrap from "$lib/components/dashboard/DashWrap.svelte";
+	import DateDropdown from "$lib/components/DateDropdown.svelte";
 	import DevTagLoading from "$lib/components/DevTagLoading.svelte";
-	import Graph from "$lib/components/dashboard/analytics/Graph.svelte";
-	import DashSection from "$lib/components/dashboard/DashSection.svelte";
-	import DataKey from "$lib/components/dashboard/analytics/DataKey.svelte";
-	import DateDropdown from "$lib/components/dashboard/DateDropdown.svelte";
-	import Comparison from "$lib/components/dashboard/analytics/Comparison.svelte";
-	import GraphLoading from "$lib/components/dashboard/analytics/GraphLoading.svelte";
 
-	let custom: Date;
-	let selected = DateOption.Week;
+	import type { Tweened } from "svelte/motion";
+
+	let modeDebounce: NodeJS.Timeout;
 	let request: Promise<App.AnalyticsResponse> = new Promise(() => {});
 
-	// Encode dates based on the selected option
-	const encodeDate = (option: DateOption) => {
-		const now = new Date();
+	// Custom animation for the circular ratio view
+	let percent: Tweened<number>;
 
-		switch (option) {
-			case DateOption.Week:
-				now.setDate(now.getDate() - 7);
+	// Store the mode that the analytics are in, admins can switch between personal and global analytics
+	let mode: "global" | "personal" =
+		$user.role === "Admin" ? "global" : "personal";
 
-				break;
-			case DateOption.Month:
-				now.setDate(now.getDate() - 30);
-
-				break;
-			case DateOption.Year:
-				now.setMonth(now.getMonth() - 12);
-
-				break;
-			case DateOption.Custom:
-				const date = custom.toLocaleDateString("en-CA");
-
-				return `startDate=${date}&endDate=${date}`;
-		}
-
-		return `startDate=${now.toLocaleDateString(
-			"en-CA"
-		)}&endDate=${new Date().toLocaleDateString("en-CA")}`;
+	// Store the selected start and end dates
+	let dates: { startDate: Date | null; endDate: Date | null } = {
+		startDate: null,
+		endDate: null
 	};
 
-	const search = () => {
-		request = fetch(`/api/stats?${encodeDate(selected)}`)
+	const onSearch = () => {
+		request = fetch(
+			`/api/stats?startDate=${dates.startDate!.toLocaleDateString(
+				"en-CA"
+			)}&endDate=${dates.endDate!.toLocaleDateString(
+				"en-CA"
+			)}&mode=${mode}`
+		)
 			.then((res) => res.json())
 			.then((analytics: App.AnalyticsResponse) => {
 				percent.set(
-					Math.trunc(
-						(analytics.new /
-							(analytics.new + analytics.returning)) *
-							100
-					)
+					analytics.new + analytics.returning
+						? Math.trunc(
+								(analytics.new /
+									(analytics.new + analytics.returning)) *
+									100
+						  )
+						: 0
 				);
 
 				return analytics;
 			});
 	};
 
-	// Custom animation for circular view ratio gradient
-	const percent = tweened(0, {
-		duration: 1500,
-		easing: quintInOut
-	});
+	// Show loading animation on mode switch while waiting for debounce and also
+	// set animation percentage to zero
+	$: mode,
+		(request = new Promise(() => {})),
+		(percent = tweened(0, {
+			duration: 1500,
+			easing: quintInOut
+		}));
+
+	// Debounce for mode switching
+	const changeMode = () => {
+		clearTimeout(modeDebounce);
+
+		modeDebounce = setTimeout(onSearch, 300);
+	};
 </script>
 
 <svelte:head>
@@ -73,15 +79,64 @@
 </svelte:head>
 
 <DashWrap>
-	<DashHero title="Your Analytics" />
+	<DashHero title={$user.role === "Admin" ? "Analytics" : "Your Analytics"} />
 
 	<DateDropdown
 		on:change={() => (request = new Promise(() => {}))}
-		on:search={({ detail }) =>
-			(selected = detail.selected) &&
-			(custom = detail.custom) &&
-			search()}
+		on:search={({ detail }) => {
+			const startDate =
+				detail.selected === DateOption.Custom
+					? detail.custom
+					: new Date();
+
+			switch (detail.selected) {
+				case DateOption.Week:
+					startDate.setDate(startDate.getDate() - 7);
+
+					break;
+				case DateOption.Month:
+					startDate.setMonth(startDate.getMonth() - 1);
+
+					break;
+				case DateOption.Half:
+					startDate.setMonth(startDate.getMonth() - 6);
+
+					break;
+				case DateOption.Year:
+					startDate.setFullYear(startDate.getFullYear() - 1);
+			}
+
+			dates.startDate = startDate;
+			dates.endDate =
+				detail.selected === DateOption.Custom
+					? detail.custom
+					: new Date();
+
+			onSearch();
+		}}
 	/>
+
+	{#if $user.role === "Admin"}
+		<div
+			class="flex gap-4 justify-center max-w-sm mx-auto mb-8 lg:mb-12 lg:-mt-4"
+		>
+			<DashButton
+				on:click={() => (mode = "global") && changeMode()}
+				disabled={mode === "global"}
+				class="flex-1 opacity-60 bg-gray-900 hover:bg-gray-900/60 disabled:hover:bg-gray-900 disabled:opacity-100"
+			>
+				Global
+			</DashButton>
+
+			<DashButton
+				on:click={() => (mode = "personal") && changeMode()}
+				disabled={mode === "personal"}
+				class="flex-1 opacity-60 bg-gray-900 hover:bg-gray-900/60 disabled:hover:bg-gray-900 disabled:opacity-100"
+			>
+				Personal
+			</DashButton>
+		</div>
+	{/if}
 
 	<div class="text-center font-semibold flex flex-col gap-8">
 		<div class="flex flex-col gap-8">
@@ -90,7 +145,7 @@
 				class="flex flex-col gap-8 lg:flex-row"
 			>
 				<div
-					class="bg-gray-500/40 p-6 rounded-lg md:flex md:gap-4 md:items-center lg:flex-col lg:w-full lg:gap-0"
+					class="bg-gray-900 p-6 rounded-lg md:flex md:gap-4 md:items-center lg:flex-col lg:w-full lg:gap-0"
 				>
 					{#await request}
 						<div
@@ -168,11 +223,13 @@
 						{@const views = analytics.returning + analytics.new}
 
 						<div
-							class="rounded-full p-4 aspect-square w-52 mx-auto mb-6 from-blue-light to-blue-dark relative md:w-48 md:m-0 lg:shrink-0"
+							class:to-blue-dark={views}
+							class:from-blue-light={views}
+							class="rounded-full p-4 aspect-square w-52 mx-auto mb-6 relative md:w-48 md:m-0 lg:shrink-0"
 							style="background: conic-gradient(var(--tw-gradient-from) calc({$percent}%), var(--tw-gradient-to) 0)"
 						>
 							<div
-								class="absolute inset-3 rounded-full bg-gray-800 flex items-center justify-center shadow-[0_0_5px_3px_rgba(0,0,0,0.4)]"
+								class="absolute inset-3 rounded-full bg-gray-700 flex items-center justify-center shadow-[0_0_7px_6px_rgba(0,0,0,0.15)]"
 							>
 								<h1 class="font-semibold max-w-[10rem]">
 									{#if views}
@@ -202,7 +259,7 @@
 									value={analytics.new}
 									className={views
 										? "text-blue-light"
-										: "text-gray-500/40"}
+										: "text-gray-700"}
 									label="New"
 								/>
 
@@ -210,7 +267,7 @@
 									value={analytics.returning}
 									className={views
 										? "text-blue-dark"
-										: "text-gray-500/40"}
+										: "text-gray-700"}
 									label="Returning"
 								/>
 							</div>
@@ -225,7 +282,7 @@
 				</div>
 
 				<div
-					class="flex flex-col gap-4 bg-gray-500/40 rounded-lg p-6 lg:w-full"
+					class="flex flex-col gap-4 bg-gray-900 rounded-lg p-6 lg:w-full"
 				>
 					<h1 class="font-semibold text-lg">Top Soft Skills</h1>
 
@@ -277,7 +334,7 @@
 
 			<DashSection
 				title="Projects"
-				class="bg-gray-500/40 rounded-lg flex flex-col gap-4 p-6 lg:grid lg:grid-cols-2"
+				class="bg-gray-900 rounded-lg flex flex-col gap-4 p-6 lg:grid lg:grid-cols-2"
 			>
 				<h1 class="font-semibold text-lg">Top Tech Skills</h1>
 
@@ -315,7 +372,7 @@
 			</DashSection>
 		</div>
 
-		<div class="bg-gray-500/40 px-4 py-6 rounded-lg">
+		<div class="bg-gray-900 px-4 py-6 rounded-lg">
 			{#await request}
 				<GraphLoading />
 			{:then analytics}
@@ -323,7 +380,7 @@
 			{/await}
 		</div>
 
-		<div class="bg-gray-500/40 px-4 py-6 rounded-lg">
+		<div class="bg-gray-900 px-4 py-6 rounded-lg">
 			{#await request}
 				<GraphLoading />
 			{:then analytics}

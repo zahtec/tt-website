@@ -10,14 +10,22 @@ export const load: PageServerLoad<{
 }> = async ({ params, parent }) => {
 	const user = await parent();
 
-	// Grab the project usning the slug and also matching the owner ID.
+	// Grab the project using the slug and also matching the owner ID.
 	// Should only be one project since the slug is unique
 	const project = await getProjects({
 		url: params.project,
-		OR: [{ ownerId: user.id }, { authors: { some: { userId: user.id } } }]
+
+		...(user.role === "Admin"
+			? {}
+			: {
+					OR: [
+						{ ownerId: user.id },
+						{ authors: { some: { userId: user.id } } }
+					]
+			  })
 	});
 
-	if (!project || !project.length) throw redirect(302, "/dashboard/projects");
+	if (!project.length) throw redirect(302, "/dashboard/projects");
 
 	return { project: project[0] };
 };

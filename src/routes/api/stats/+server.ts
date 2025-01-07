@@ -1,55 +1,222 @@
 import Redis from "ioredis";
 import { error } from "@sveltejs/kit";
+import { createHash } from "node:crypto";
 import { BetaAnalyticsDataClient } from "@google-analytics/data";
 
 import { colors } from "$lib/enums";
-import { createHash } from "node:crypto";
+import { dev } from "$app/environment";
 import { env } from "$env/dynamic/private";
 import { prisma, userAuth } from "$lib/prisma";
 
 import type { RequestHandler } from "./$types";
 import type { SoftSkill, TechSkill } from "@prisma/client";
 
-// Request handlers for managing user data in prisma, it uses the users session token to verify the API call
+// Request handlers for getting Google Analytics data, with a Redis cash to prevent exceeding the API limit
 
-const redis = new Redis(env.REDIS_URL);
+const redis = new Redis(env.REDIS_URL, { family: dev ? 4 : 6 });
 
 // Create google analytics fetching client
 const analytics = new BetaAnalyticsDataClient({
 	credentials: {
 		client_email: env.GOOGLE_EMAIL,
-		// Replace \n characters with actual newlines because google is wack
+		// Replace newline characters in API key with actual newlines
 		private_key: env.GOOGLE_KEY.replaceAll(/\\n/gm, "\n")
 	}
 });
 
 // Get analytics data for the specific user
-// * INPUT: startDate=string, endDate=string
-// * OUTPUT: AnalyticsResponse
+// * INPUT: startDate=string, endDate=string, mode=global|personal|users, ids?=string[]
+// * OUTPUT: AnalyticsResponse | UsersAnalyticsResponse
 export const GET: RequestHandler = async ({ locals, request }) => {
-	const user = await userAuth(locals);
+	const user = (await userAuth(locals, true))!;
 
-	if (!user) throw error(401, "Unauthorized");
+	const query = new URL(request.url).searchParams;
 
-	// Grab all projects this person is an author on to pull up relevant analytics
-	const projects = await prisma.project.findMany({
-		where: { ownerId: user.id },
-		select: { id: true, title: true }
-	});
+	const mode = query.get("mode") as "users" | "global" | "personal" | null;
 
-	const projectIds = projects.map((project) => project.id);
+	// If the mode is on anything but personal and the user isn't an admin, throw unauthorized
+	if ((mode === "users" || mode === "global") && user.role !== "Admin")
+		throw error(401, "Unauthorized");
 
 	try {
-		const url = new URL(request.url).searchParams;
+		// If the mode is users, get all the user id's provided
+		let ids = query.get("ids")?.split(",");
 
-		const data = {
-			startDate: url.get("startDate")!,
-			endDate: url.get("endDate")!
+		if (user.role === "Admin" && mode === "users" && ids) {
+			const data: App.UsersAnalyticsResponse = {};
+			const requests: Parameters<typeof analytics.runReport>[0][] = [];
+
+			// Check if any of the ids have already been cached and grab their cached data instead
+			await Promise.all(
+				ids.map(async (id) => {
+					// Get the cached data from redis, the hash is different from the normal analytics since we keep them
+					// seperate. The reason for this is because this request only gets view data while the others get much
+					// more for per-user analytics and we can't keep partial data under the same hash
+
+					const cached = await redis.get(
+						createHash("shake128", { outputLength: 10 })
+							.update("users" + id)
+							.digest("hex")
+					);
+
+					// If cache was found then remove them from the IDs and add their data, otherwise
+					// add a request in for them
+					if (cached) {
+						const analytics = JSON.parse(cached);
+
+						data[id] = {
+							new: analytics.new,
+							returning: analytics.returning
+						};
+
+						ids = ids!.filter((i) => i !== id);
+					} else
+						requests.push({
+							dateRanges: [
+								{ startDate: "30daysAgo", endDate: "today" }
+							],
+							metrics: [
+								{
+									name: "eventCount"
+								}
+							],
+							dimensions: [
+								{
+									name: "newVsReturning"
+								},
+								{
+									name: "customEvent:id"
+								}
+							],
+							dimensionFilter: {
+								andGroup: {
+									expressions: [
+										{
+											filter: {
+												fieldName: "eventName",
+												stringFilter: {
+													value: "user_view"
+												}
+											}
+										},
+										{
+											filter: {
+												fieldName: "customEvent:id",
+												stringFilter: {
+													value: id
+												}
+											}
+										}
+									]
+								}
+							}
+						});
+				})
+			);
+
+			// Grab all the remaining waiting to be fetched data
+			if (requests.length) {
+				let reports = [];
+
+				for (let i = 0; i < requests.length; i += 5) {
+					reports.push(
+						(
+							await analytics
+								.batchRunReports({
+									property: "properties/336430086",
+									requests: requests.slice(i, i + 5)
+								})
+								.catch(() => {
+									throw error(400, "Bad Request");
+								})
+						)[0].reports!
+					);
+				}
+
+				// Flatten all reports into one array
+				reports = reports.flat();
+
+				await Promise.all(
+					reports.map(async (report) => {
+						// If there's no data don't fill any out for this user
+						if (!report.rows?.length) return;
+
+						const analytics = {
+							new: 0,
+							returning: 0
+						};
+
+						report.rows!.forEach((row) => {
+							const views = parseInt(row.metricValues![0].value!);
+
+							// If this row is for returning users, add the views, otherwise add it to new users
+							row.dimensionValues![0].value! === "returning"
+								? (analytics.returning += views)
+								: (analytics.new += views);
+						});
+
+						// Add it to the return data
+						data[report.rows![0].dimensionValues![1].value!] =
+							analytics;
+
+						const hash = createHash("shake128", {
+							outputLength: 10
+						})
+							.update(
+								"users" +
+									report.rows![0].dimensionValues![1].value!
+							)
+							.digest("hex");
+
+						// Cache the data
+						await redis.set(hash, JSON.stringify(analytics));
+
+						// Create a 6 hour caching period
+						await redis.expire(hash, 60 * 60 * 6);
+					})
+				);
+			}
+
+			// Add zeros for all the remaining users that returned no data
+			await Promise.all(
+				ids.map(async (id) => {
+					if (data[id]) return;
+
+					data[id] = { new: 0, returning: 0 };
+
+					const hash = createHash("shake128", {
+						outputLength: 10
+					})
+						.update("users" + id)
+						.digest("hex");
+
+					// Cache the data
+					await redis.set(
+						hash,
+						JSON.stringify({ new: 0, returning: 0 })
+					);
+
+					// Create a 6 hour caching period
+					await redis.expire(hash, 60 * 60 * 6);
+				})
+			);
+
+			return new Response(JSON.stringify(data), { status: 200 });
+		}
+
+		const dates = {
+			startDate: query.get("startDate")!,
+			endDate: query.get("endDate")!
 		};
 
-		// Create a unique hash of this request
+		const isPersonal = mode === "personal";
+
+		// Create a unique hash of this request, if it's an admin add a boolean to the has to differentiate
+		// global data to their personal data
 		const hash = createHash("shake128", { outputLength: 10 })
-			.update(data.startDate + data.endDate + user.id)
+			.update(
+				dates.startDate + dates.endDate + (isPersonal ? user.id : mode)
+			)
 			.digest("hex");
 
 		// Check if this request has been cached
@@ -57,12 +224,21 @@ export const GET: RequestHandler = async ({ locals, request }) => {
 
 		if (cached) return new Response(cached, { status: 200 });
 
+		// Grab all projects this person is an author on to pull up relevant analytics, or if
+		// the user is an admin grab all projects
+		const projects = await prisma.project.findMany({
+			...(isPersonal ? { where: { ownerId: user.id } } : {}),
+			select: { id: true, title: true }
+		});
+
+		const projectIds = projects.map((project) => project.id);
+
 		// Provide comparisons to the previous data within the same selected time period. For example if month
 		// is selected provide a comparison to the previous month, if week is then compare to the previous week
-		const end = new Date(data.endDate).getTime();
+		const start = new Date(dates.startDate).getTime();
 		let previous: string | { startDate: string; endDate: string } =
 			new Date(
-				end - (new Date(data.startDate).getTime() - end)
+				start - (new Date(dates.endDate).getTime() - start)
 			).toLocaleDateString("en-CA");
 		previous = { startDate: previous, endDate: previous };
 
@@ -71,7 +247,7 @@ export const GET: RequestHandler = async ({ locals, request }) => {
 			// Grab the users views across all their pages and new vs returning users for the date range selected
 			// and the previous based on that date range
 			{
-				dateRanges: [data, previous],
+				dateRanges: [dates, previous],
 				metrics: [
 					{
 						name: "eventCount"
@@ -93,21 +269,25 @@ export const GET: RequestHandler = async ({ locals, request }) => {
 									}
 								}
 							},
-							{
-								filter: {
-									fieldName: "customEvent:id",
-									stringFilter: {
-										value: user.id
-									}
-								}
-							}
+							...(isPersonal
+								? [
+										{
+											filter: {
+												fieldName: "customEvent:id",
+												stringFilter: {
+													value: user.id
+												}
+											}
+										}
+								  ]
+								: [])
 						]
 					}
 				}
 			},
 			// Grab the users top soft skills filters in search
 			{
-				dateRanges: [data, previous],
+				dateRanges: [dates, previous],
 				metrics: [
 					{
 						name: "eventCount"
@@ -132,14 +312,18 @@ export const GET: RequestHandler = async ({ locals, request }) => {
 									}
 								}
 							},
-							{
-								filter: {
-									fieldName: "customEvent:id",
-									stringFilter: {
-										value: user.id
-									}
-								}
-							}
+							...(isPersonal
+								? [
+										{
+											filter: {
+												fieldName: "customEvent:id",
+												stringFilter: {
+													value: user.id
+												}
+											}
+										}
+								  ]
+								: [])
 						]
 					}
 				},
@@ -159,7 +343,7 @@ export const GET: RequestHandler = async ({ locals, request }) => {
 			requests.push(
 				// Grab the users project views along with the percent scrolled on each project
 				{
-					dateRanges: [data],
+					dateRanges: [dates],
 					metrics: [
 						{
 							name: "eventCount"
@@ -206,7 +390,7 @@ export const GET: RequestHandler = async ({ locals, request }) => {
 				},
 				// Grab the users project clicks in search results along with the tech skills
 				{
-					dateRanges: [data, previous],
+					dateRanges: [dates, previous],
 					metrics: [
 						{
 							name: "eventCount"
@@ -404,6 +588,9 @@ export const GET: RequestHandler = async ({ locals, request }) => {
 		// The key is the date selected along with the users ID all hashed to improve performance, we
 		// don't want to be using that entire string as the key
 		await redis.set(hash, json);
+
+		// Create a 6 hour caching period
+		await redis.expire(hash, 60 * 60 * 6);
 
 		return new Response(json, { status: 200 });
 	} catch {
